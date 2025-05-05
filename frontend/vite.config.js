@@ -10,6 +10,11 @@ export default defineConfig({
         target: 'http://localhost:5000',
         changeOrigin: true,
       }
-    }
+    },
+    allowedHosts: ['teste1.gestaoti.cloud', 'insta.gestaoti.cloud']
+  },
+  define: {
+    'import.meta.env.VITE_API_URL': JSON.stringify('/api'),
+    'import.meta.env.VITE_API_REMOTE_URL': JSON.stringify('https://teste1.gestaoti.cloud/api')
   }
 }) 

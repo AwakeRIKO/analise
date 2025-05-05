@@ -40,7 +40,7 @@
     <div v-if="profile && !loading" class="analysis-results">
       <div class="profile-header">
         <div class="profile-image">
-          <img :src="profile.profilePicture" alt="Foto do perfil">
+          <img :src="processedProfileImage" alt="Foto do perfil" @error="handleImageError">
         </div>
         <div class="profile-info">
           <h2>{{ profile.fullName || profile.username }}</h2>
@@ -112,8 +112,25 @@ export default {
       inputUsername: '',
       loading: false,
       error: null,
-      profile: null
+      profile: null,
+      imageFallback: '/images/profile-placeholder.svg'
     };
+  },
+  computed: {
+    processedProfileImage() {
+      if (!this.profile || !this.profile.profilePicture) {
+        return this.imageFallback;
+      }
+      
+      // Verificar se é uma URL do Instagram
+      if (this.profile.profilePicture.includes('instagram') && 
+          this.profile.profilePicture.includes('fbcdn.net')) {
+        // Remover parâmetros que possam estar causando problemas
+        return this.profile.profilePicture.split('?')[0];
+      }
+      
+      return this.profile.profilePicture;
+    }
   },
   methods: {
     async analyzeProfile() {
@@ -177,6 +194,10 @@ export default {
       } else {
         return num.toString();
       }
+    },
+    handleImageError(e) {
+      console.error("Erro ao carregar imagem de perfil");
+      e.target.src = this.imageFallback;
     }
   }
 };
@@ -186,26 +207,37 @@ export default {
 .container {
   max-width: 900px;
   margin: 0 auto;
-  padding: 2rem 1rem;
+  padding: 1.5rem 1rem;
 }
 
 .page-title {
   text-align: center;
-  font-size: 2rem;
-  margin-bottom: 2rem;
+  font-size: 1.75rem;
+  margin-bottom: 1.5rem;
   color: #333;
+}
+
+@media (min-width: 768px) {
+  .container {
+    padding: 2rem 1rem;
+  }
+  
+  .page-title {
+    font-size: 2rem;
+    margin-bottom: 2rem;
+  }
 }
 
 .analyze-form-container {
   max-width: 500px;
-  margin: 0 auto 2rem;
+  margin: 0 auto 1.5rem;
 }
 
 .analyze-form {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  padding: 1.5rem;
+  padding: 1.25rem;
   background: #f9f9f9;
   border-radius: 8px;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
@@ -227,54 +259,261 @@ export default {
   align-items: center;
   background: white;
   border: 1px solid #ccc;
-  border-radius: 4px;
-  overflow: hidden;
+  border-radius: 6px;
+  padding: 0.75rem;
+  font-size: 1rem;
 }
 
 .input-prefix {
-  background: #eee;
-  padding: 0.75rem 0.75rem;
   color: #666;
-  border-right: 1px solid #ccc;
+  margin-right: 0.5rem;
 }
 
-input {
+.input-wrapper input {
   flex: 1;
-  padding: 0.75rem;
   border: none;
   outline: none;
+  background: transparent;
   font-size: 1rem;
 }
 
 .btn-analyze {
-  padding: 0.75rem 1.5rem;
-  background: #405DE6;
+  background: #E1306C;
   color: white;
   border: none;
-  border-radius: 4px;
-  font-size: 1rem;
+  padding: 0.875rem 1rem;
+  border-radius: 6px;
   font-weight: 600;
+  font-size: 1rem;
   cursor: pointer;
   transition: background 0.2s;
 }
 
 .btn-analyze:hover {
-  background: #3651d8;
+  background: #c62b5f;
+}
+
+/* Estilos para resultados da análise */
+.profile-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background: #f9f9f9;
+  border-radius: 8px;
+}
+
+@media (min-width: 640px) {
+  .profile-header {
+    flex-direction: row;
+    text-align: left;
+    padding: 1.5rem;
+  }
+}
+
+.profile-image {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  overflow: hidden;
+  margin-bottom: 1rem;
+}
+
+@media (min-width: 640px) {
+  .profile-image {
+    margin-right: 1.5rem;
+    margin-bottom: 0;
+  }
+}
+
+.profile-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.profile-info h2 {
+  font-size: 1.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.username {
+  color: #666;
+  margin-bottom: 0.75rem;
+}
+
+.bio {
+  margin-bottom: 1rem;
+  line-height: 1.4;
+}
+
+.profile-link {
+  display: inline-block;
+  background: #f3f3f3;
+  color: #555;
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  text-decoration: none;
+  font-size: 0.875rem;
+  transition: background 0.2s;
+}
+
+.profile-link:hover {
+  background: #e5e5e5;
+}
+
+.stats-container {
+  margin-bottom: 2rem;
+  padding: 1rem;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+}
+
+.stats-container h3 {
+  font-size: 1.25rem;
+  margin-bottom: 1rem;
+  text-align: center;
+}
+
+.stats {
+  display: flex;
+  justify-content: space-between;
+  text-align: center;
+}
+
+.stat-item {
+  flex: 1;
+  padding: 0 0.5rem;
+}
+
+.stat-value {
+  display: block;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #E1306C;
+  margin-bottom: 0.25rem;
+}
+
+.stat-label {
+  color: #666;
+  font-size: 0.875rem;
+}
+
+/* Recomendações */
+.recommendations-container {
+  margin-bottom: 2rem;
+}
+
+.recommendations-container h3 {
+  font-size: 1.25rem;
+  margin-bottom: 1rem;
+  text-align: center;
+}
+
+.recommendations {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+
+@media (min-width: 640px) {
+  .recommendations {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.recommendation-card {
+  background: white;
+  border-radius: 8px;
+  padding: 1rem;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+  position: relative;
+}
+
+.rec-priority {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  color: white;
+}
+
+.rec-priority.alta {
+  background: #e74c3c;
+}
+
+.rec-priority.média {
+  background: #f39c12;
+}
+
+.rec-priority.baixa {
+  background: #3498db;
+}
+
+.recommendation-card h4 {
+  font-size: 1.1rem;
+  margin-bottom: 0.75rem;
+  padding-right: 4rem;
+}
+
+.recommendation-card p {
+  color: #666;
+  margin-bottom: 1rem;
+  line-height: 1.4;
+}
+
+.benefits-title {
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: #444;
+}
+
+.benefits-list {
+  list-style-type: disc;
+  padding-left: 1.5rem;
+}
+
+.benefits-list li {
+  margin-bottom: 0.25rem;
+  color: #666;
+}
+
+/* Botões e loader */
+.btn-reset {
+  background: #f3f3f3;
+  color: #666;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 6px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-reset:hover {
+  background: #e5e5e5;
 }
 
 .loading-container {
   text-align: center;
-  margin: 3rem auto;
+  padding: 2rem 0;
 }
 
 .loader {
-  border: 5px solid #f3f3f3;
-  border-top: 5px solid #405DE6;
-  border-radius: 50%;
+  display: inline-block;
   width: 50px;
   height: 50px;
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid #E1306C;
+  border-radius: 50%;
   animation: spin 1s linear infinite;
-  margin: 0 auto 1rem;
+  margin-bottom: 1rem;
 }
 
 @keyframes spin {
@@ -283,257 +522,25 @@ input {
 }
 
 .error-message {
-  margin: 2rem auto;
+  background: #fff5f5;
+  border-left: 4px solid #e74c3c;
   padding: 1rem;
-  background: #ffebee;
-  border-left: 4px solid #f44336;
-  border-radius: 4px;
-  color: #d32f2f;
-  text-align: center;
-  max-width: 500px;
-}
-
-.btn-reset {
-  margin-top: 1rem;
-  padding: 0.5rem 1rem;
-  background: transparent;
-  color: #333;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.btn-reset:hover {
-  background: #f5f5f5;
-}
-
-.analysis-results {
-  margin-top: 2rem;
-  padding: 2rem;
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-}
-
-.profile-header {
-  display: flex;
-  gap: 1.5rem;
-  margin-bottom: 2rem;
-}
-
-.profile-image {
-  flex-shrink: 0;
-  width: 120px;
-  height: 120px;
-  border-radius: 50%;
-  overflow: hidden;
-  border: 3px solid #E1306C;
-  padding: 3px;
-}
-
-.profile-image img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  border-radius: 50%;
-}
-
-.profile-info {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.profile-info h2 {
-  margin: 0;
-  font-size: 1.5rem;
-  color: #333;
-}
-
-.username {
-  color: #666;
-  font-size: 1.1rem;
-  margin: 0;
-}
-
-.bio {
-  margin: 0.5rem 0;
-  color: #333;
-  line-height: 1.4;
-}
-
-.profile-link {
-  display: inline-block;
-  margin-top: 0.75rem;
-  color: #405DE6;
-  text-decoration: none;
-  font-weight: 500;
-}
-
-.profile-link:hover {
-  text-decoration: underline;
-}
-
-.stats-container, .recommendations-container {
-  margin-top: 2rem;
-  padding: 1.5rem;
-  background: #f9f9f9;
-  border-radius: 8px;
-}
-
-h3 {
-  margin-top: 0;
-  margin-bottom: 1rem;
-  font-size: 1.25rem;
-  color: #333;
-  border-bottom: 2px solid #E1306C;
-  padding-bottom: 0.5rem;
-  display: inline-block;
-}
-
-.stats {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.stat-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.25rem;
-  flex: 1;
-  padding: 1rem;
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-}
-
-.stat-value {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: #333;
-}
-
-.stat-label {
-  font-size: 0.9rem;
-  color: #666;
-}
-
-.recommendations {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-  gap: 1.5rem;
-  margin-top: 1rem;
-}
-
-.recommendation-card {
-  position: relative;
-  padding: 1.5rem;
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  border-top: 3px solid #405DE6;
-}
-
-.recommendation-card h4 {
-  margin-top: 0;
-  font-size: 1.1rem;
-  color: #333;
-  margin-bottom: 0.75rem;
-}
-
-.recommendation-card p {
-  color: #666;
-  font-size: 0.9rem;
-  line-height: 1.5;
-  margin: 0;
-}
-
-.rec-priority {
-  position: absolute;
-  top: 0;
-  right: 0;
-  padding: 0.25rem 0.75rem;
-  font-size: 0.8rem;
-  color: white;
-  border-radius: 0 8px 0 8px;
-  font-weight: 600;
-}
-
-.rec-priority.alta {
-  background: #f44336;
-}
-
-.rec-priority.média {
-  background: #ff9800;
-}
-
-.rec-priority.baixa {
-  background: #4CAF50;
-}
-
-.no-recommendations {
-  background: white;
-  padding: 1.5rem;
-  border-radius: 8px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  text-align: center;
-  color: #666;
+  margin-bottom: 1.5rem;
+  color: #c0392b;
 }
 
 .analysis-footer {
-  margin-top: 2rem;
   text-align: center;
+  margin-top: 2rem;
 }
 
-.benefits {
-  margin-top: 0.75rem;
-  border-top: 1px dashed #eee;
-  padding-top: 0.75rem;
+/* Tela de resultados */
+.analysis-results {
+  animation: fadeIn 0.5s;
 }
 
-.benefits-title {
-  font-size: 0.85rem;
-  font-weight: 600;
-  margin-bottom: 0.5rem;
-  color: #555;
-}
-
-.benefits-list {
-  margin: 0;
-  padding-left: 1.25rem;
-  font-size: 0.85rem;
-  color: #666;
-}
-
-.benefits-list li {
-  margin-bottom: 0.25rem;
-}
-
-@media (max-width: 768px) {
-  .profile-header {
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-  }
-  
-  .profile-image {
-    margin-right: 0;
-    margin-bottom: 1.5rem;
-  }
-  
-  .stats {
-    flex-wrap: wrap;
-  }
-  
-  .stat-item {
-    min-width: 40%;
-  }
-  
-  .recommendations {
-    grid-template-columns: 1fr;
-  }
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 </style> 

@@ -27,20 +27,25 @@ const ProfileSearchInput = ({ onSearch }) => {
   
   return (
     <motion.div 
-      className="card p-6 mb-8"
+      className="bg-white rounded-lg shadow-lg p-6 md:p-8 border border-gray-100"
       initial={{ y: -20, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
       transition={{ duration: 0.3 }}
     >
-      <h2 className="text-xl font-semibold mb-4 flex items-center">
-        <FaInstagram className="text-instagram-purple mr-2" size={24} />
-        Buscar perfil do Instagram
+      <h2 className="section-title mb-6">
+        <FaInstagram className="text-primary mr-3" size={24} />
+        Análise de Perfil Instagram
       </h2>
       
-      <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-4">
-        <div className="relative flex-grow">
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <span className="text-gray-500">@</span>
+      <p className="text-gray-600 mb-6">
+        Insira o nome de usuário do Instagram para obter uma análise completa com
+        recomendações personalizadas e insights estratégicos para crescimento.
+      </p>
+      
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="relative">
+          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+            <span className="text-primary font-medium">@</span>
           </div>
           <input
             type="text"
@@ -58,16 +63,18 @@ const ProfileSearchInput = ({ onSearch }) => {
         
         <button
           type="submit"
-          className="btn btn-primary flex items-center justify-center"
+          className="btn btn-primary w-full flex items-center justify-center"
         >
           <FaSearch className="mr-2" />
-          Analisar
+          Analisar Perfil
         </button>
       </form>
       
-      <p className="mt-4 text-sm text-gray-500">
-        Digite o nome de usuário do Instagram para análise (com ou sem @)
-      </p>
+      <div className="mt-6 pt-5 border-t border-gray-100 text-center">
+        <p className="text-sm text-gray-500">
+          Receba resultados baseados em inteligência artificial e anos de experiência em marketing digital
+        </p>
+      </div>
     </motion.div>
   )
 }

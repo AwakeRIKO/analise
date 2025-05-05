@@ -2,9 +2,51 @@ const express = require('express');
 const cors = require('cors');
 const puppeteer = require('puppeteer');
 const path = require('path');
-// const { GoogleGenerativeAI } = require("@google/generative-ai"); // Remove Gemini
-const OpenAI = require("openai"); // Importa OpenAI
-require('dotenv').config();
+const OpenAI = require('openai');
+// const { GoogleGenerativeAI } = require('@google/generative-ai'); // Removido Gemini
+const dotenv = require('dotenv');
+const { PythonShell } = require('python-shell');
+const fs = require('fs');
+const mysql = require('mysql2/promise');
+const axios = require('axios');
+// const generateStrategicRecommendationsWithGemini = require('./generateStrategicRecommendationsWithGemini'); // Removido Gemini
+// const generateStrategicRecommendationsWithDeepSeek = require('./generateStrategicRecommendationsWithDeepSeek'); // Removido DeepSeek
+const generateStrategicRecommendationsWithOpenAI = require('./generateStrategicRecommendationsWithOpenAI'); // Adicionado OpenAI
+const generateBioAnalysisWithOpenAI = require('./generateBioAnalysisWithOpenAI'); // Adicionado análise de biografia
+const https = require('https');
+const crypto = require('crypto');
+
+// Carregar variáveis de ambiente
+try {
+  // Tentar carregar do arquivo .env na pasta backend
+  const envPath = path.resolve(__dirname, '.env');
+  if (fs.existsSync(envPath)) {
+    console.log(`Arquivo .env encontrado em: ${envPath}`);
+    dotenv.config({ path: envPath });
+  } else {
+    // Tentar carregar do arquivo .env na raiz do projeto
+    const rootEnvPath = path.resolve(__dirname, '..', '.env');
+    if (fs.existsSync(rootEnvPath)) {
+      console.log(`Arquivo .env encontrado na raiz: ${rootEnvPath}`);
+      dotenv.config({ path: rootEnvPath });
+    } else {
+      console.warn('Arquivo .env não encontrado. Usando valores padrão de configuração.');
+      dotenv.config(); // Tentar carregar normalmente, mesmo assim
+    }
+  }
+} catch (error) {
+  console.error('Erro ao carregar arquivo .env:', error);
+}
+
+// Importar a função fetchProfileData do instagram.js
+const { fetchProfileData } = require('./src/services/instagram');
+
+// --- Configurações da Evolution API para WhatsApp ---
+const WHATSAPP_INSTANCE = process.env.WHATSAPP_INSTANCE || "Lucas"; // Valor padrão caso .env falhe
+const WHATSAPP_API_KEY = process.env.WHATSAPP_API_KEY; // Lê a chave do .env
+const WHATSAPP_URL = `https://api.vendadb.com/message/sendText/${WHATSAPP_INSTANCE}`;
+const WHATSAPP_RECIPIENT_NUMBER = process.env.WHATSAPP_RECIPIENT_NUMBER; // Lê o número do .env
+// -------------------------------------------------
 
 const app = express();
 
@@ -110,948 +152,433 @@ const SERVICES = {
   socialMedia: { service: "Planos de Social Media", startingPrice: 499.99 }
 };
 
-// Credenciais de login do Instagram
-const INSTAGRAM_CREDENTIALS = {
-  username: 'arlindamaranhao65',
-  password: 'Th110490@'
+// --- Configuração do Banco de Dados ---
+// !! Recomendação: Mover para variáveis de ambiente (.env) !!
+const dbConfig = {
+  host: process.env.DB_HOST || '177.74.189.168', // Lê do .env ou usa valor padrão
+  port: parseInt(process.env.DB_PORT) || 3309, // Converte a porta para número
+  user: process.env.DB_USER || 'ricardo',
+  password: process.env.DB_PASSWORD, // Lê a senha do .env (sem valor padrão por segurança)
+  database: process.env.DB_DATABASE || 'instagram_automation',
+  waitForConnections: true,
+  connectionLimit: 10, // Limite de conexões no pool
+  queueLimit: 0
 };
 
-// Inicializa OpenAI se a chave API estiver presente
-let openai;
+console.log('Configuração de banco de dados:', { 
+  host: dbConfig.host, 
+  port: dbConfig.port, 
+  user: dbConfig.user, 
+  database: dbConfig.database,
+  password: dbConfig.password ? '******' : 'NÃO DEFINIDA'
+});
+
+// Inicializar OpenAI API apenas se a chave estiver disponível no .env
+let openai = null;
 if (process.env.OPENAI_API_KEY) {
-  console.log("Chave API OpenAI encontrada. Inicializando...");
   try {
-    // Exibir os primeiros caracteres para debug (nunca exiba a chave inteira)
-    const keyStart = process.env.OPENAI_API_KEY.substring(0, 10);
-    console.log(`Formato da chave: ${keyStart}... (${process.env.OPENAI_API_KEY.length} caracteres)`);
-    
     openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-      dangerouslyAllowBrowser: false, // Forçar uso apenas em backend
+      apiKey: process.env.OPENAI_API_KEY
     });
-    
-    // Testar a conexão imediatamente
-    (async () => {
-      try {
-        console.log("Testando conexão com a API OpenAI...");
-        const testResult = await openai.chat.completions.create({
-          model: "gpt-4",
-          messages: [
-            { role: "user", content: "Olá, teste de conexão." }
-          ],
-          max_tokens: 5
-        });
-        console.log("Conexão com a API OpenAI confirmada:", 
-          testResult.choices && testResult.choices.length > 0 ? "Sucesso" : "Sem respostas");
-      } catch (testErr) {
-        // Se falhar com gpt-4, tentar outro modelo como fallback
-        console.error("ERRO NO TESTE DE CONEXÃO:", testErr.message);
-        try {
-          console.log("Tentando modelo alternativo...");
-          const fallbackResult = await openai.completions.create({
-            model: "text-davinci-003", // Modelo de completions em vez de chat
-            prompt: "Olá, teste de conexão.",
-            max_tokens: 5
-          });
-          console.log("Conexão com modelo alternativo confirmada:", 
-            fallbackResult.choices && fallbackResult.choices.length > 0 ? "Sucesso" : "Sem respostas");
-          
-          // Se chegar aqui, o modelo alternativo funcionou
-          console.log("IMPORTANTE: Usando modelo alternativo para todas as chamadas");
-          // Flag global para usar modelo alternativo
-          global.useAlternativeModel = true;
-        } catch (fallbackErr) {
-          console.error("ERRO NO MODELO ALTERNATIVO:", fallbackErr.message);
-          if (fallbackErr.response) {
-            console.error("Status:", fallbackErr.response.status);
-            console.error("Detalhes:", JSON.stringify(fallbackErr.response.data || {}, null, 2));
-          }
-          console.error("Desativando integração com OpenAI devido a falha nos testes");
-          openai = null;
-        }
-      }
-    })();
-  } catch (err) {
-    console.error("Erro ao inicializar OpenAI:", err);
-    openai = null;
+    console.log('API OpenAI inicializada com sucesso');
+  } catch (error) {
+    console.error('Erro ao inicializar API OpenAI:', error);
   }
 } else {
   console.warn("Chave API OpenAI não encontrada no .env. A análise por IA será desativada.");
 }
 
-// Função de Scraper com Puppeteer
-async function scrapeInstagramProfile(username) {
-  let browser = null;
+let dbPool;
+
+async function initializeDbPool() {
   try {
-    console.log(`Iniciando scraping para: ${username}`);
-    browser = await puppeteer.launch({
-      headless: true, // Mude para false para ver o navegador abrir
-      args: [
-        '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
-        '--lang=pt-BR,pt', '--disable-gpu', // Desabilitar GPU pode ajudar em alguns sistemas
-        '--disable-infobars', '--window-size=1280,800' // Define tamanho da janela
-      ]
-    });
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1280, height: 800 }); // Define viewport
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36'); // User Agent mais recente
-    await page.setExtraHTTPHeaders({ 'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7' });
-
-    // Login no Instagram antes de acessar o perfil
-    console.log('Tentando fazer login no Instagram...');
-    try {
-      // Acessar página de login
-      await page.goto('https://www.instagram.com/accounts/login/', { waitUntil: 'networkidle0', timeout: 60000 });
-      
-      // Aguardar pelo formulário de login
-      await page.waitForSelector('input[name="username"]', { timeout: 15000 });
-      
-      // Preencher credenciais
-      await page.type('input[name="username"]', INSTAGRAM_CREDENTIALS.username, { delay: 50 });
-      await page.type('input[name="password"]', INSTAGRAM_CREDENTIALS.password, { delay: 50 });
-      
-      // Clicar no botão de login
-      await Promise.all([
-        page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 }),
-        page.click('button[type="submit"]')
-      ]);
-      
-      // Esperar um pouco para garantir que o login processou
-      await page.waitForTimeout(3000);
-      
-      // Verificar se o login foi bem-sucedido (verificando se elementos típicos de falha de login não estão presentes)
-      const loginFailed = await page.evaluate(() => {
-        const errorElements = document.querySelectorAll('p[data-testid="login-error-message"], div[role="alert"]');
-        return errorElements.length > 0;
-      });
-      
-      if (loginFailed) {
-        console.error('Falha no login do Instagram. Verificar credenciais.');
-      } else {
-        console.log('Login no Instagram bem-sucedido');
-        
-        // Lidar com possíveis popups ou diálogos após login
-        try {
-          // Verificar se há diálogo de "Salvar informações de login"
-          const saveLoginInfoButton = await page.$x("//button[contains(text(), 'Agora não')]");
-          if (saveLoginInfoButton.length > 0) {
-            await saveLoginInfoButton[0].click();
-            await page.waitForTimeout(1000);
-          }
-          
-          // Verificar se há diálogo de "Ativar notificações"
-          const notNowButton = await page.$x("//button[contains(text(), 'Agora não')]");
-          if (notNowButton.length > 0) {
-            await notNowButton[0].click();
-            await page.waitForTimeout(1000);
-          }
-        } catch (dialogError) {
-          console.log('Nenhum diálogo encontrado ou erro ao processar diálogos:', dialogError.message);
-        }
-      }
-    } catch (loginError) {
-      console.error('Erro durante o processo de login:', loginError);
-    }
-
-    // Agora vamos para o perfil desejado
-    const url = `https://www.instagram.com/${username}/`;
-    console.log(`Navegando para: ${url}`);
-    await page.goto(url, { waitUntil: 'networkidle0', timeout: 90000 }); // Aumenta timeout e espera mais
-
-    // Verificar se a página carregou corretamente ou se é "Página não encontrada"
-    const pageNotFound = await page.evaluate(() => {
-      const title = document.title.toLowerCase();
-      const bodyText = document.body.innerText;
-      return bodyText.includes('Esta página não está disponível') || title.includes('página não encontrada') || title.includes('page not found');
-    });
-
-    if (pageNotFound) {
-      console.error(`Perfil não encontrado ou página indisponível para: ${username}`);
-      return null;
-    }
-
-    // Verificar se é um perfil privado
-    const isPrivate = await page.evaluate(() => {
-      return document.body.innerText.includes('Esta conta é privada') ||
-             document.body.innerText.includes('This account is private');
-    });
-
-    if (isPrivate) {
-      console.log(`Perfil é privado: ${username}. Verificando se estamos logados e temos acesso...`);
-      
-      // Verificar se mesmo com login ainda não temos acesso (não seguimos a conta)
-      const noAccess = await page.evaluate(() => {
-        return document.body.innerText.includes('Seguir') || 
-               document.body.innerText.includes('Follow');
-      });
-      
-      if (noAccess) {
-        console.log('Não temos acesso ao perfil privado, pois não seguimos esta conta.');
-        // Você pode implementar aqui a ação de seguir a conta se desejar
-      }
-    }
-
-    console.log(`Página carregada para: ${username}. Aguardando seletores...`);
-    // Espera por um seletor chave do cabeçalho do perfil para garantir carregamento
-    try {
-      await page.waitForSelector('main header section', { timeout: 15000 });
-    } catch (e) {
-      console.warn('Seletor principal do cabeçalho não encontrado. A página pode não ter carregado completamente.');
-      // Poderia retornar null aqui ou continuar tentando
-    }
-
-    console.log('Iniciando extração de dados...');
-
-    // Capturar screenshot para debug
-    await page.screenshot({ path: 'profile-debug.png' });
-    console.log('Screenshot de debug salvo como profile-debug.png');
-
-    const profileData = await page.evaluate((username) => {
-      const data = { username };
-      
-      // Função melhorada para extrair números
-      const extractCount = (text) => {
-        if (!text) return 0;
-        console.log(`Extraindo número de: "${text}"`);
-        
-        // Verificar se o texto contém unidades como "mi" (milhões) ou "mil" (milhares)
-        const lowerText = text.toLowerCase();
-        
-        // Extrair números com milhões (por exemplo, "4,4 mi" em português ou "4.4M" em inglês)
-        if (lowerText.includes('mi') || lowerText.includes('m ') || lowerText.includes('m\n') || lowerText.includes('m)') || lowerText.includes('m.')) {
-          console.log('Detectado formato em MILHÕES');
-          // Remover tudo exceto dígitos, vírgulas e pontos
-          const numText = text.replace(/[^0-9,.]/g, '');
-          
-          // Converter para número, considerando formato brasileiro (vírgula como decimal)
-          let value = parseFloat(numText.replace(',', '.'));
-          
-          // Multiplicar por 1 milhão
-          return Math.round(value * 1000000);
-        }
-        
-        // Extrair números com milhares (por exemplo, "15,7 mil" em português ou "15.7K" em inglês)
-        if (lowerText.includes('mil') || lowerText.includes('k ') || lowerText.includes('k\n') || lowerText.includes('k)') || lowerText.includes('k.')) {
-          console.log('Detectado formato em MILHARES');
-          // Remover tudo exceto dígitos, vírgulas e pontos
-          const numText = text.replace(/[^0-9,.]/g, '');
-          
-          // Converter para número, considerando formato brasileiro (vírgula como decimal)
-          let value = parseFloat(numText.replace(',', '.'));
-          
-          // Multiplicar por 1 mil
-          return Math.round(value * 1000);
-        }
-        
-        // Para números sem sufixo de escala, remover pontos de milhar e converter vírgulas
-        const cleanedText = text.replace(/\./g, '').replace(/,/g, '.');
-        
-        // Remover não-números exceto ponto decimal
-        const numericPart = cleanedText.replace(/[^0-9.]/g, '');
-        
-        // Converter para número
-        let num = parseFloat(numericPart);
-        
-        // Validar o resultado
-        if (isNaN(num)) {
-          console.warn(`Não foi possível extrair número de "${text}", retornando 0`);
-          return 0;
-        }
-        
-        const result = Math.round(num);
-        console.log(`Número extraído: ${result}`);
-        return result;
-      };
-
-      // MÉTODO 1: Tenta obter estatísticas usando seletores de lista
-      const obtainStatsMethod1 = () => {
-        console.log("Tentando método 1 para extrair estatísticas");
-        const listItems = Array.from(document.querySelectorAll('main header section ul li'));
-        
-        if (listItems.length >= 3) {
-          const stats = {
-            postsCount: 0,
-            followersCount: 0,
-            followingCount: 0
-          };
-          
-          // Para cada item da lista, tentar extrair o texto
-          listItems.forEach((item, index) => {
-            const text = item.textContent.trim();
-            console.log(`Item ${index}: "${text}"`);
-            
-            if (text.includes('publicaç') || text.includes('post')) {
-              stats.postsCount = extractCount(text);
-            } else if (text.includes('seguidor')) {
-              stats.followersCount = extractCount(text);
-            } else if (text.includes('seguindo')) {
-              stats.followingCount = extractCount(text);
-            }
-          });
-          
-          return stats;
-        }
-        return null;
-      };
-      
-      // MÉTODO 2: Tenta obter estatísticas usando a ordem dos elementos
-      const obtainStatsMethod2 = () => {
-        console.log("Tentando método 2 para extrair estatísticas");
-        const listItems = Array.from(document.querySelectorAll('main header section ul li span, main header section ul li button'));
-        
-        if (listItems.length >= 3) {
-          return {
-            postsCount: extractCount(listItems[0]?.innerText),
-            followersCount: extractCount(listItems[1]?.innerText),
-            followingCount: extractCount(listItems[2]?.innerText)
-          };
-        }
-        return null;
-      };
-      
-      // MÉTODO 3: Busca por textos específicos em toda a página
-      const obtainStatsMethod3 = () => {
-        console.log("Tentando método 3 para extrair estatísticas");
-        const allText = document.body.innerText;
-        const followerMatch = allText.match(/(\d[\d,.]*)\s*seguidores/i);
-        const followingMatch = allText.match(/(\d[\d,.]*)\s*seguindo/i);
-        const postsMatch = allText.match(/(\d[\d,.]*)\s*publicações/i) || 
-                          allText.match(/(\d[\d,.]*)\s*posts/i);
-        
-        return {
-          postsCount: postsMatch ? extractCount(postsMatch[1]) : 0,
-          followersCount: followerMatch ? extractCount(followerMatch[1]) : 0,
-          followingCount: followingMatch ? extractCount(followingMatch[1]) : 0
-        };
-      };
-      
-      // Tenta extrair estatísticas de conta privada (apenas visível quando logado)
-      const obtainStatsForPrivateAccount = () => {
-        console.log("Tentando extrair dados de conta privada");
-        // Estatística de posts em conta privada (geralmente aparece de forma diferente)
-        const privatePostCount = document.querySelector('main[role="main"] section span');
-        let postsCount = 0;
-        
-        if (privatePostCount) {
-          const postText = privatePostCount.innerText;
-          if (postText.includes('publicaç') || postText.includes('post')) {
-            postsCount = extractCount(postText);
-          }
-        }
-        
-        // Tenta extrair seguidores/seguindo de conta privada
-        const followStats = Array.from(document.querySelectorAll('main[role="main"] ul li span'));
-        let followersCount = 0;
-        let followingCount = 0;
-        
-        followStats.forEach(stat => {
-          const text = stat.innerText;
-          if (text.includes('seguidor')) {
-            followersCount = extractCount(text);
-          } else if (text.includes('seguindo')) {
-            followingCount = extractCount(text);
-          }
-        });
-        
-        return {
-          postsCount,
-          followersCount,
-          followingCount
-        };
-      };
-      
-      // Tentar os métodos em sequência
-      let stats = obtainStatsMethod1();
-      
-      if (!stats || (stats.postsCount === 0 && stats.followersCount === 0 && stats.followingCount === 0)) {
-        stats = obtainStatsMethod2();
-      }
-      
-      if (!stats || (stats.postsCount === 0 && stats.followersCount === 0 && stats.followingCount === 0)) {
-        stats = obtainStatsMethod3();
-      }
-      
-      // Se ainda não temos estatísticas e pode ser uma conta privada, tentar método específico
-      if (!stats || (stats.postsCount === 0 && stats.followersCount === 0 && stats.followingCount === 0)) {
-        const isPrivate = document.body.innerText.includes('Esta conta é privada') || 
-                         document.body.innerText.includes('This account is private');
-        
-        if (isPrivate) {
-          stats = obtainStatsForPrivateAccount();
-        }
-      }
-      
-      // Mesmo se todos os métodos falharem, garantir que temos um objeto estatísticas
-      stats = stats || { postsCount: 0, followersCount: 0, followingCount: 0 };
-      
-      // Verificar se todos os valores são iguais (possível erro)
-      if (stats.postsCount === stats.followersCount && stats.followersCount === stats.followingCount && stats.postsCount > 0) {
-        console.warn("ALERTA: Todos os valores estatísticos são iguais. Possível erro de extração.");
-      }
-      
-      // Adicionar estatísticas ao objeto de dados
-      data.postsCount = stats.postsCount;
-      data.followersCount = stats.followersCount;
-      data.followingCount = stats.followingCount;
-
-      // Extração da foto de perfil
-      data.profilePicture = document.querySelector('main header img[data-testid="user-avatar"], main header img._aagv')?.src || 
-                          document.querySelector('main header img')?.src;
-
-      // Extração do nome completo
-      const nameElement = document.querySelector('main header section h1, main header section h2, span[data-bloks-name="bk.components.Text"][role="button"]');
-      if (nameElement) data.fullName = nameElement.innerText.trim();
-
-      // Extração da Bio (MELHORADA - tenta vários seletores)
-      let bioElement = document.querySelector('main header section div > h1 + span, main header section div._aa_c > span');
-
-      // Se não encontrou com o seletor original, tenta alternativas
-      if (!bioElement || !bioElement.innerText.trim()) {
-        // Tenta outros seletores comuns para a bio
-        const bioSelectors = [
-          'header section > div:nth-child(3) > span',
-          'header section div > span[dir="auto"]',
-          'header div._aa_c > div > span',
-          'header section > div > div > span',
-          'header h1 + div > span',
-          'article > div > div > span',
-          'header span[title]',
-          // Tentativa extrema: qualquer span em header com texto e sem href
-          'header span:not(:has(a)):not(:empty)'
-        ];
-        
-        for (const selector of bioSelectors) {
-          bioElement = document.querySelector(selector);
-          if (bioElement && bioElement.innerText.trim()) break;
-        }
-        
-        // Última tentativa: meta description
-        if (!bioElement || !bioElement.innerText.trim()) {
-          const metaDesc = document.querySelector('meta[name="description"]');
-          if (metaDesc && metaDesc.content) {
-            const content = metaDesc.content;
-            // Tenta extrair a bio da descrição (formato comum: "X followers, X following, X posts - Bio")
-            const bioMatch = content.match(/posts\s*-\s*(.*)/i);
-            if (bioMatch && bioMatch[1]) {
-              data.bio = bioMatch[1].trim();
-              bioElement = { innerText: data.bio }; // Cria objeto fictício para controle de fluxo
-            }
-          }
-        }
-      }
-
-      if (bioElement && bioElement.innerText.trim()) {
-        data.bio = bioElement.innerText.trim();
-      } else {
-        // Texto mais claro quando realmente não conseguimos encontrar a bio
-        data.bio = "Bio não encontrada. O Instagram pode ter alterado a estrutura da página.";
-      }
-
-      // Verificar se é perfil privado
-      data.isPrivate = document.body.innerText.includes('Esta conta é privada') || 
-                       document.body.innerText.includes('This account is private');
-
-      // Mídias Recentes (URLs das Imagens/Thumbnails)
-      data.media = [];
-      
-      // Se não for perfil privado ou tivermos acesso (logado e seguindo), tentar extrair imagens
-      if (!data.isPrivate || document.querySelector('article')) {
-        // Tenta várias abordagens para encontrar imagens
-        const findImages = () => {
-          // Método 1: Seletores específicos para estrutura atual
-          const specificSelectors = [
-            'article a[href*="/p/"] div._aagu img, article a[href*="/reel/"] div._aagu img',
-            'article div._aabd img',
-            'article div[role="button"] img',
-            'main article img[srcset]',
-            'div._aagv img', // Imagens em thumbnails
-            'span[role="link"] img' // Algumas imagens em grid view
-          ];
-          
-          for (const selector of specificSelectors) {
-            const images = Array.from(document.querySelectorAll(selector));
-            if (images.length > 0) {
-              console.log(`Encontradas ${images.length} imagens usando seletor: ${selector}`);
-              return images.slice(0, 6).map(img => img.src || img.srcset?.split(' ')[0]);
-            }
-          }
-          
-          // Método 2: Busca por URLs em links que parecem ser posts
-          const postLinks = Array.from(document.querySelectorAll('a[href*="/p/"]'));
-          if (postLinks.length > 0) {
-            const linksWithImages = postLinks.filter(link => link.querySelector('img'));
-            if (linksWithImages.length > 0) {
-              console.log(`Encontradas ${linksWithImages.length} imagens em links de posts`);
-              return linksWithImages.slice(0, 6).map(link => {
-                const img = link.querySelector('img');
-                return img?.src || img?.srcset?.split(' ')[0];
-              });
-            }
-          }
-          
-          // Método 3: Última tentativa - pegar qualquer imagem que pareça ser um post
-          const allImages = Array.from(document.querySelectorAll('img[srcset]')).filter(img => {
-            // Filtrar imagens muito pequenas e avatares/ícones
-            const rect = img.getBoundingClientRect();
-            return rect.width > 100 && rect.height > 100 && !img.src.includes('profile_pic');
-          });
-          
-          if (allImages.length > 0) {
-            console.log(`Encontradas ${allImages.length} imagens gerais`);
-            return allImages.slice(0, 6).map(img => img.src || img.srcset?.split(' ')[0]);
-          }
-          
-          // Nenhuma imagem encontrada
-          return [];
-        };
-
-        // Tenta encontrar as imagens
-        const imageUrls = findImages();
-
-        // Se encontrou imagens, processa-as
-        if (imageUrls.length > 0) {
-          imageUrls.forEach(url => {
-            if (url) {
-              data.media.push({ url, type: 'image', likes: Math.floor(Math.random() * 50) + 10, comments: Math.floor(Math.random() * 10) + 1 }); 
-            }
-          });
-          console.log(`Extraídas ${data.media.length} imagens do perfil`);
-        }
-      }
-      
-      // Se não conseguiu extrair imagens (por ser privado ou outro motivo), usar placeholders
-      if (data.media.length === 0) {
-        console.log('Não foi possível extrair imagens, usando placeholder informativos');
-        
-        // Se não conseguiu extrair nenhuma imagem, cria placeholders informativos
-        // que combinam com o tema do perfil, para uso em demonstração
-        const themes = ['viagem', 'moda', 'comida', 'fitness', 'tecnologia', 'arte'];
-        const profileTheme = username.includes('fit') || username.includes('gym') ? 'fitness' :
-                             username.includes('dev') || username.includes('tech') ? 'tecnologia' :
-                             username.includes('food') || username.includes('chef') ? 'comida' :
-                             username.includes('art') || username.includes('design') ? 'arte' :
-                             username.includes('travel') || username.includes('trip') ? 'viagem' :
-                             'moda'; // default
-        
-        // Cria 6 placeholders temáticos
-        for (let i = 1; i <= 6; i++) {
-          data.media.push({
-            url: `https://source.unsplash.com/random/400x400/?${profileTheme},${i}`,
-            type: 'image',
-            likes: Math.floor(Math.random() * 100) + 20,
-            comments: Math.floor(Math.random() * 20) + 2
-          });
-        }
-      }
-
-      // Defaults
-      data.fullName = data.fullName || username;
-      data.profilePicture = data.profilePicture || 'https://placehold.co/150?text=?';
-      data.engagementRate = 0.045; // Taxa de engajamento padrão (4.5%)
-
-      return data;
-    }, username);
-
-    await browser.close();
-    console.log(`Scraping concluído para: ${username}`);
-    
-    // Log de validação final
-    console.log("Estatísticas extraídas:", {
-      posts: profileData.postsCount,
-      followers: profileData.followersCount,
-      following: profileData.followingCount
-    });
-    
-    return profileData;
-
+    dbPool = mysql.createPool(dbConfig);
+    // Tenta pegar uma conexão para testar
+    const connection = await dbPool.getConnection();
+    console.log('Conexão com o banco de dados MySQL estabelecida com sucesso.');
+    connection.release(); // Libera a conexão de volta para o pool
   } catch (error) {
-    console.error(`Erro GERAL durante o scraping para ${username}:`, error);
-    if (browser) { await browser.close(); }
-    throw new Error('Falha no scraping do perfil.');
+    console.error('Erro ao conectar ao banco de dados MySQL:', error);
+    // Considerar parar a aplicação se o DB for essencial
+    // process.exit(1); 
+    dbPool = null; // Define como null para checagens posteriores
   }
 }
 
-// Adicionar esta nova função em algum lugar apropriado (por exemplo, antes da rota /api/profile/:username)
-/**
- * Gera uma análise local com base nos dados do perfil sem usar IA externa
- * @param {Object} profileData - Dados do perfil extraídos
- * @returns {string} - Texto da análise
- */
-function generateLocalAnalysis(profileData) {
-  // Verificar se temos uma bio válida
-  const hasBio = !profileData.bio.includes("não encontrada") && !profileData.bio.includes("não extraída");
-  
-  // Calcular razão seguidores/seguindo
-  const followRatio = profileData.followingCount > 0 
-    ? (profileData.followersCount / profileData.followingCount).toFixed(2) 
-    : 0;
-  
-  // Número de posts
-  const hasManyPosts = profileData.postsCount > 50;
-  
-  // Iniciar a análise
-  let analysis = `## Sugestões para @${profileData.username}\n\n`;
-  
-  // Analisar a bio
-  if (!hasBio) {
-    analysis += "1. **Otimize sua Bio**: Crie uma biografia atraente que inclua:\n";
-    analysis += "   - Uma descrição clara do seu nicho ou especialidade\n";
-    analysis += "   - Palavras-chave relevantes para SEO do Instagram\n";
-    analysis += "   - Emojis para destacar pontos importantes\n";
-    analysis += "   - Uma call-to-action (ex: \"Clique no link abaixo\")\n\n";
-  } else {
-    analysis += "1. **Melhore sua Bio**: Certifique-se que sua bio comunique claramente seu valor e inclua palavras-chave relevantes.\n\n";
+// Função para inicializar tabelas do banco de dados
+async function initializeDatabase() {
+  if (!dbPool) {
+    console.warn('Não foi possível inicializar tabelas - pool de conexão não disponível');
+    return;
   }
-  
-  // Analisar razão seguidores/seguindo
-  if (followRatio < 1) {
-    analysis += `2. **Equilibre sua Relação Seguidores/Seguindo**: Sua proporção atual (${followRatio}) está abaixo do ideal. Considere:\n`;
-    analysis += "   - Deixar de seguir contas inativas ou irrelevantes\n";
-    analysis += "   - Interagir mais com contas em seu nicho para ganhar seguidores\n";
-    analysis += "   - Utilizar hashtags mais estratégicas\n\n";
-  } else {
-    analysis += `2. **Mantenha seu Crescimento**: Sua proporção de seguidores/seguindo (${followRatio}) é positiva. Continue:\n`;
-    analysis += "   - Interagindo com contas semelhantes à sua\n";
-    analysis += "   - Usando hashtags relevantes e específicas\n\n";
+
+  try {
+    // Criar tabela para histórico de consultas
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS profile_search_history (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        username VARCHAR(255) NOT NULL,
+        full_name VARCHAR(255),
+        followers INT,
+        following INT,
+        posts INT,
+        engagement_rate FLOAT,
+        search_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        bio TEXT,
+        profile_picture_url TEXT,
+        raw_data LONGTEXT
+      )
+    `);
+    console.log('Tabela profile_search_history inicializada com sucesso');
+  } catch (error) {
+    console.error('Erro ao inicializar tabelas:', error);
   }
-  
-  // Analisar posts
-  if (!hasManyPosts) {
-    analysis += "3. **Aumente sua Frequência de Postagem**: Publique 3-5 vezes por semana para:\n";
-    analysis += "   - Aumentar visibilidade no algoritmo\n";
-    analysis += "   - Melhorar engajamento com seu público\n";
-    analysis += "   - Criar mais oportunidades de descoberta\n\n";
-  } else {
-    analysis += "3. **Mantenha Consistência**: Continue com postagens regulares focando em qualidade e valor para seu público.\n\n";
-  }
-  
-  // Sugestões comuns que se aplicam a qualquer perfil
-  analysis += "4. **Estratégias de Conteúdo**: Diversifique seus formatos com:\n";
-  analysis += "   - Reels curtos e criativos (prioridade no algoritmo atual)\n";
-  analysis += "   - Carrosséis informativos (maior taxa de salvamento)\n";
-  analysis += "   - Stories diários para manter engajamento\n\n";
-  
-  analysis += "5. **Aumente Engajamento**: Interaja ativamente respondendo comentários e participando de conversas em sua área.";
-  
-  return analysis;
 }
 
-// Rota para obter informações do perfil
+// Função para salvar resultado da consulta no banco
+async function saveSearchHistory(profileData) {
+   if (!dbPool) {
+    console.warn('Não foi possível salvar histórico - pool de conexão não disponível');
+    return;
+  }
+
+  try {
+    // Extrair dados relevantes
+    const username = profileData.username;
+    const fullName = profileData.fullName || '';
+    const followers = profileData.stats?.followers || profileData.followersCount || 0;
+    const following = profileData.stats?.following || profileData.followingCount || 0;
+    const posts = profileData.stats?.posts || profileData.postsCount || 0;
+    const engagementRate = profileData.engagementRate || 0;
+    const bio = profileData.bio || '';
+    const profilePicture = profileData.profilePicture || '';
+    
+    console.log(`Tentando salvar no banco de dados: username=${username}, followers=${followers}, following=${following}, posts=${posts}`);
+    
+    // Salvar dados no banco
+    const result = await dbPool.query(
+      `INSERT INTO profile_search_history 
+       (username, full_name, followers, following, posts, engagement_rate, bio, profile_picture_url, raw_data)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        username,
+        fullName,
+        followers,
+        following,
+        posts,
+        engagementRate,
+        bio,
+        profilePicture,
+        JSON.stringify(profileData)
+      ]
+    );
+    
+    console.log(`Histórico de consulta salvo para ${username} com ID ${result[0].insertId}`);
+    return result[0].insertId;
+  } catch (error) {
+    console.error('Erro ao salvar histórico de busca:', error);
+    console.error('Detalhes do erro:', {
+      message: error.message,
+      code: error.code,
+      errno: error.errno,
+      sqlState: error.sqlState,
+      sqlMessage: error.sqlMessage
+    });
+    return null;
+  }
+}
+
+// Rotas
+app.get('/status', (req, res) => {
+  res.json({
+    status: 'online',
+    message: 'Servidor funcionando normalmente',
+    timestamp: new Date().toISOString(),
+    version: '1.0.0',
+    openaiAvailable: !!openai,
+  });
+});
+
+app.get('/api/status', (req, res) => {
+  res.json({
+    status: 'online',
+    message: 'Servidor funcionando normalmente',
+    timestamp: new Date().toISOString(),
+    version: '1.0.0',
+    openaiAvailable: !!openai,
+  });
+});
+
+// Rota para baixar e salvar imagens de perfil do Instagram
+app.get('/api/profile-image/:username', async (req, res) => {
+  const { username } = req.params;
+  const imageUrl = req.query.url;
+  
+  if (!imageUrl) {
+    return res.status(400).send('URL da imagem é obrigatória');
+  }
+  
+  try {
+    // Criar um nome de arquivo único baseado no nome de usuário (para cache)
+    const filename = `${username.toLowerCase()}.jpg`;
+    // Usar a pasta compartilhada entre os PCs
+    const sharedPath = path.join(__dirname, '..', 'foto', filename);
+    
+    // Verificar se a imagem já existe na pasta compartilhada
+    if (fs.existsSync(sharedPath)) {
+      console.log(`Imagem de perfil para ${username} encontrada na pasta compartilhada.`);
+      
+      // Servir o arquivo diretamente
+      return res.sendFile(sharedPath);
+    }
+    
+    console.log(`Baixando imagem de perfil para: ${username} da URL: ${imageUrl}`);
+    
+    // Baixar a imagem usando Axios e salvar localmente
+    const response = await axios({
+      method: 'get',
+      url: imageUrl,
+      responseType: 'arraybuffer',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Referer': 'https://www.instagram.com/'
+      }
+    });
+    
+    // Salvar a imagem na pasta compartilhada
+    fs.writeFileSync(sharedPath, response.data);
+    console.log(`Imagem de perfil salva para: ${username} em ${sharedPath}`);
+    
+    // Servir o arquivo recém-baixado
+    res.sendFile(sharedPath);
+  } catch (error) {
+    console.error('Erro ao baixar imagem de perfil:', error.message);
+    // Se falhar, redirecionar para uma imagem de placeholder
+    res.redirect('/images/profile-placeholder.svg');
+  }
+});
+
+// Rota para buscar perfil sem prefixo /api
+app.get('/profile/:username', async (req, res) => {
+  const { username } = req.params;
+  console.log(`Recebida requisição para perfil: ${username}`);
+
+  try {
+    // Implementação da rota...
+    let profileData = await fetchProfileData(username);
+    
+    if (!profileData) {
+      console.log(`Usando dados MOCK para: ${username}`);
+      profileData = {
+        ...MOCK_PROFILE,
+        username: username
+      };
+    }
+    
+    // Gerar sugestões de serviços baseadas no perfil
+    profileData.servicesSuggestions = generateServiceSuggestions(profileData);
+    
+    res.json(profileData);
+  } catch (error) {
+    console.error('Erro ao processar dados do perfil:', error);
+    res.status(500).json({ error: 'Erro ao processar dados do perfil' });
+  }
+});
+
+// Rota original com prefixo /api
 app.get('/api/profile/:username', async (req, res) => {
   const { username } = req.params;
   console.log(`Recebida requisição para perfil: ${username}`);
 
   try {
-    let profileData = await scrapeInstagramProfile(username);
+    // Implementação da rota...
+    let profileData = await fetchProfileData(username);
     
-    // Gerar análise com OpenAI
-    console.log(`Gerando análise com OpenAI para: ${username}`);
-    
-    if (openai) {
-      console.log('Status da integração OpenAI: Disponível');
-      try {
-        console.log('Enviando requisição para OpenAI...');
-        const completion = await openai.chat.completions.create({
-          model: "gpt-3.5-turbo",
-          messages: [
-            {
-              role: "system",
-              content: `Você é um especialista em marketing digital e Instagram. 
-                       Analise os dados do perfil e forneça 5 recomendações específicas para melhorar o perfil.
-                       Retorne APENAS um array JSON com as recomendações, onde cada recomendação tem:
-                       - title: título curto da recomendação
-                       - description: descrição detalhada da recomendação
-                       - benefits: array com 2-3 benefícios específicos
-                       - priority: "Alta", "Média" ou "Baixa" baseado na importância`
-            },
-            {
-              role: "user",
-              content: `Analise este perfil do Instagram:
-                       Username: ${profileData.username}
-                       Seguidores: ${profileData.followersCount}
-                       Seguindo: ${profileData.followingCount}
-                       Posts: ${profileData.postsCount}
-                       Bio: ${profileData.bio}
-                       
-                       Forneça 5 recomendações específicas para melhorar este perfil.`
-            }
-          ],
-          temperature: 0.7,
-          max_tokens: 1500
-        });
+    // Adicionar log para verificar os dados brutos, incluindo foto
+    console.log('Dados recebidos de fetchProfileData:', JSON.stringify(profileData, null, 2));
 
-        const aiResponse = completion.choices[0].message.content;
-        console.log('Texto de resposta:', aiResponse);
-
-        try {
-          // Tentar extrair array JSON da resposta, mesmo se estiver cercado de texto
-          let jsonContent = aiResponse;
-          
-          // Tentar encontrar o início e fim de um array JSON
-          const arrayStartIndex = aiResponse.indexOf('[');
-          const arrayEndIndex = aiResponse.lastIndexOf(']');
-          
-          if (arrayStartIndex !== -1 && arrayEndIndex !== -1 && arrayEndIndex > arrayStartIndex) {
-            jsonContent = aiResponse.substring(arrayStartIndex, arrayEndIndex + 1);
-            console.log('Extraído JSON da resposta:', jsonContent);
-          }
-          
-          // Tentar fazer o parse do JSON
-          const recommendations = JSON.parse(jsonContent);
-          
-          if (Array.isArray(recommendations) && recommendations.length > 0) {
-            console.log(`JSON analisado com sucesso: ${recommendations.length} recomendações`);
-            
-            // Verificar e corrigir cada recomendação para garantir formato correto
-            profileData.aiAnalysis = recommendations.map(rec => ({
-              title: rec.title || "Recomendação",
-              description: rec.description || "Descrição não disponível",
-              benefits: Array.isArray(rec.benefits) ? rec.benefits : ["Melhor visibilidade", "Aumento de engajamento"],
-              priority: ["Alta", "Média", "Baixa"].includes(rec.priority) ? rec.priority : "Média"
-            }));
-            
-            // Adicionar recomendações de serviços com base na análise do perfil
-            try {
-              // Segunda chamada à IA para sugerir serviços
-              const serviceCompletion = await openai.chat.completions.create({
-                model: "gpt-3.5-turbo",
-                messages: [
-                  {
-                    role: "system",
-                    content: `Você é um consultor de marketing digital especializado em crescimento de Instagram.
-                             Com base na análise do perfil, recomende entre 1-3 serviços da lista abaixo que seriam 
-                             mais adequados para este perfil específico.
-                             
-                             Lista de serviços disponíveis:
-                             1. Seguidores Brasileiros: 600-650 por R$ 54,90 (Teste), 1000-1300 por R$ 74,90, 2000-2300 por R$ 129,90
-                             2. Curtidas Brasileiras: 500 por R$ 45,00, 1000 por R$ 60,00
-                             3. Comentários Brasileiros: 10 por R$ 20,00, 50 por R$ 70,00, 100 por R$ 100,00
-                             4. Visualizações em Stories: 1000 por R$ 69,90
-                             5. Visualizações em Vídeos: 1000 por R$ 55,00
-                             
-                             Retorne APENAS um array JSON com os serviços recomendados, onde cada recomendação tem:
-                             - service_type: tipo do serviço (ex: "seguidores", "curtidas")
-                             - package: pacote específico (ex: "600-650 seguidores")
-                             - price: preço do pacote
-                             - reason: motivo da recomendação específico para este perfil (2-3 frases)`
-                  },
-                  {
-                    role: "user",
-                    content: `Analise este perfil do Instagram e recomende os serviços mais adequados:
-                             Username: ${profileData.username}
-                             Seguidores atuais: ${profileData.followersCount}
-                             Seguindo: ${profileData.followingCount}
-                             Posts: ${profileData.postsCount}
-                             Bio: ${profileData.bio}
-                             
-                             Além das recomendações de marketing já feitas, quais serviços pagos seriam ideais para este perfil?`
-                  }
-                ],
-                temperature: 0.7,
-                max_tokens: 1000
-              });
-              
-              const serviceResponse = serviceCompletion.choices[0].message.content;
-              console.log('Resposta de serviços:', serviceResponse);
-              
-              // Extrair JSON da resposta
-              let serviceJson = serviceResponse;
-              const serviceStartIndex = serviceResponse.indexOf('[');
-              const serviceEndIndex = serviceResponse.lastIndexOf(']');
-              
-              if (serviceStartIndex !== -1 && serviceEndIndex !== -1 && serviceEndIndex > serviceStartIndex) {
-                serviceJson = serviceResponse.substring(serviceStartIndex, serviceEndIndex + 1);
-              }
-              
-              // Tentar fazer o parse do JSON
-              const serviceRecommendations = JSON.parse(serviceJson);
-              
-              if (Array.isArray(serviceRecommendations) && serviceRecommendations.length > 0) {
-                profileData.serviceRecommendations = serviceRecommendations;
-              }
-            } catch (serviceError) {
-              console.error('Erro ao gerar recomendações de serviços:', serviceError);
-              // Fallback para recomendações padrão
-              profileData.serviceRecommendations = [
-                {
-                  service_type: "seguidores",
-                  package: profileData.followersCount < 1000 ? "1000-1300 seguidores" : "2000-2300 seguidores",
-                  price: profileData.followersCount < 1000 ? 74.90 : 129.90,
-                  reason: "Aumentar a base de seguidores é essencial para criar credibilidade e autoridade no Instagram. Este pacote ajudará a atingir o próximo nível."
-                },
-                {
-                  service_type: "curtidas",
-                  package: "500 curtidas",
-                  price: 45.00,
-                  reason: "Aumentar o engajamento nos posts demonstra relevância para o algoritmo do Instagram. Curtidas adicionais potencializam o alcance orgânico."
-                }
-              ];
-            }
-          } else {
-            throw new Error('Formato de recomendações inválido');
-          }
-        } catch (parseError) {
-          console.error('Erro ao analisar JSON da OpenAI:', parseError);
-          // Fallback para análise local
-          profileData.aiAnalysis = [
-            {
-              title: "Otimize sua Bio",
-              description: "Crie uma biografia mais atraente e profissional que destaque sua expertise e proposta de valor.",
-              benefits: [
-                "Maior clareza sobre seu perfil",
-                "Aumento nas conversões",
-                "Melhor posicionamento profissional"
-              ],
-              priority: "Alta"
-            },
-            {
-              title: "Aumente Engajamento",
-              description: "Interaja mais com seu público através de stories, enquetes e perguntas.",
-              benefits: [
-                "Maior visibilidade no algoritmo",
-                "Fortalecimento da comunidade",
-                "Feedback direto do público"
-              ],
-              priority: "Média"
-            },
-            {
-              title: "Crie Conteúdo em Reels",
-              description: "Produza vídeos curtos e dinâmicos focados no seu nicho.",
-              benefits: [
-                "Maior alcance orgânico",
-                "Conteúdo mais envolvente",
-                "Prioridade no algoritmo"
-              ],
-              priority: "Alta"
-            },
-            {
-              title: "Otimize Hashtags",
-              description: "Use uma combinação estratégica de hashtags populares e nichadas.",
-              benefits: [
-                "Maior descoberta do perfil",
-                "Alcance de público específico",
-                "Melhor categorização do conteúdo"
-              ],
-              priority: "Média"
-            },
-            {
-              title: "Mantenha Consistência",
-              description: "Estabeleça uma frequência regular de postagens e mantenha uma identidade visual coesa.",
-              benefits: [
-                "Maior retenção de seguidores",
-                "Perfil mais profissional",
-                "Melhor previsibilidade para o público"
-              ],
-              priority: "Média"
-            }
-          ];
-        }
-
-        // Adicionar análise específica da bio se ela existir
-        if (profileData.bio && !profileData.bio.includes("não encontrada")) {
-          try {
-            console.log('Gerando análise específica da bio...');
-            
-            const bioCompletion = await openai.chat.completions.create({
-              model: "gpt-3.5-turbo",
-              messages: [
-                {
-                  role: "system",
-                  content: `Você é um especialista em otimização de perfis do Instagram.
-                           Analise a bio fornecida e forneça feedback detalhado e sugestões de melhorias.
-                           Retorne APENAS um objeto JSON com:
-                           - score: pontuação de 1 a 5 (1=ruim, 5=excelente)
-                           - strengths: array com pontos fortes da bio (máximo 3)
-                           - weaknesses: array com pontos fracos da bio (máximo 3)
-                           - improved_bio: versão melhorada da bio, mantendo o mesmo estilo mas otimizada
-                           - explanation: breve explicação das melhorias (máximo 2 frases)`
-                },
-                {
-                  role: "user",
-                  content: `Analise esta bio de Instagram para o usuário @${profileData.username}:
-                           "${profileData.bio}"
-                           
-                           Considere boas práticas como:
-                           - Uso de emojis
-                           - Quebras de linha adequadas
-                           - Call-to-action claro
-                           - Informações de contato
-                           - Nicho/especialidade definido
-                           - Comprimento adequado (máximo 150 caracteres)`
-                }
-              ],
-              temperature: 0.7,
-              max_tokens: 1000
-            });
-            
-            const bioResponse = bioCompletion.choices[0].message.content;
-            console.log('Resposta da análise de bio:', bioResponse);
-            
-            try {
-              // Extrair o JSON da resposta
-              let bioJson = bioResponse;
-              const jsonStartIndex = bioResponse.indexOf('{');
-              const jsonEndIndex = bioResponse.lastIndexOf('}');
-              
-              if (jsonStartIndex !== -1 && jsonEndIndex !== -1) {
-                bioJson = bioResponse.substring(jsonStartIndex, jsonEndIndex + 1);
-              }
-              
-              const bioAnalysis = JSON.parse(bioJson);
-              profileData.bioAnalysis = bioAnalysis;
-              
-            } catch (bioParseError) {
-              console.error('Erro ao analisar JSON da análise de bio:', bioParseError);
-              // Criar análise manual como fallback
-              profileData.bioAnalysis = {
-                score: 3,
-                strengths: ["Bio existente com informações básicas"],
-                weaknesses: ["Poderia ter mais emojis", "Falta call-to-action claro"],
-                improved_bio: profileData.bio.includes("\n") ? profileData.bio : profileData.bio + "\n👇 Confira mais em nosso link",
-                explanation: "Adicionei elementos visuais e call-to-action para aumentar o engajamento."
-              };
-            }
-          } catch (bioError) {
-            console.error('Erro ao gerar análise da bio:', bioError);
-          }
-        }
-
-        // Debug final antes de enviar
-        console.log('ENVIANDO PARA O CLIENTE:');
-        console.log('Tem aiAnalysis?', profileData.aiAnalysis ? 'SIM' : 'NÃO');
-        console.log('Tipo de aiAnalysis:', typeof profileData.aiAnalysis);
-        if (Array.isArray(profileData.aiAnalysis)) {
-          console.log('aiAnalysis é um array com', profileData.aiAnalysis.length, 'itens');
-          if (profileData.aiAnalysis.length > 0) {
-            console.log('Primeiro item:', JSON.stringify(profileData.aiAnalysis[0], null, 2));
-          }
-        }
-
-      } catch (aiError) {
-        console.error('Erro ao gerar análise com OpenAI:', aiError);
-        // Em caso de erro, usar análise local como fallback
-        profileData.aiAnalysis = generateLocalAnalysis(profileData);
-      }
-    } else {
-      console.log('OpenAI não disponível, usando análise local');
-      profileData.aiAnalysis = generateLocalAnalysis(profileData);
+    if (!profileData) {
+      console.log(`Usando dados MOCK para: ${username}`);
+      profileData = {
+        ...MOCK_PROFILE,
+        username: username
+      };
     }
+    
+    // Gerar sugestões de serviços baseadas no perfil
+    profileData.servicesSuggestions = generateServiceSuggestions(profileData);
+    
+    // Definir se OpenAI será usado (apenas se disponível)
+    let useOpenAI = !!openai; // Usará OpenAI se a chave estiver configurada
+
+    let modelUsed = 'local'; // Padrão
+    
+    // Tentar gerar recomendações estratégicas e análise da biografia com OpenAI se disponível
+    try {
+      if (useOpenAI) {
+        console.log('Gerando recomendações estratégicas com OpenAI...');
+        const strategicRecommendations = await generateStrategicRecommendationsWithOpenAI(profileData, openai);
+
+        if (strategicRecommendations) {
+          profileData.strategicRecommendations = strategicRecommendations;
+          console.log('Recomendações estratégicas geradas com sucesso pelo OpenAI');
+          modelUsed = 'openai';
+    } else {
+          console.warn('Falha ao gerar recomendações com OpenAI (função retornou null).');
+          profileData.errorRecommendations = 'Falha ao gerar recomendações com OpenAI.';
+        }
+        
+        // Gerar análise da biografia
+        console.log('Gerando análise da biografia com OpenAI...');
+        const bioAnalysis = await generateBioAnalysisWithOpenAI(profileData, openai);
+        
+        if (bioAnalysis) {
+          profileData.bioAnalysis = bioAnalysis;
+          console.log('Análise da biografia gerada com sucesso pelo OpenAI');
+    } else {
+          console.warn('Falha ao gerar análise da biografia com OpenAI (função retornou null).');
+          profileData.errorBioAnalysis = 'Falha ao gerar análise da biografia com OpenAI.';
+        }
+      }
+
+      // Adicionar o modelo usado à resposta, mesmo que seja 'local'
+      profileData.modelUsed = modelUsed;
+
+    } catch (error) {
+      console.error('Erro ao gerar recomendações estratégicas ou análise de biografia com OpenAI:', error);
+      profileData.errorRecommendations = 'Erro ao gerar recomendações ou análise de biografia com OpenAI: ' + error.message;
+    }
+
+    // Salvar histórico de consulta no banco de dados
+    await saveSearchHistory(profileData);
+
+    // Log final antes de enviar a resposta
+    console.log('Dados enviados para o frontend:', JSON.stringify(profileData, null, 2));
 
     res.json(profileData);
   } catch (error) {
-    console.error('Erro ao processar perfil:', error);
-    res.status(500).json({ error: error.message || 'Erro ao processar perfil' });
+    console.error('Erro ao processar dados do perfil:', error);
+    res.status(500).json({ error: 'Erro ao processar dados do perfil' });
   }
 });
 
-// Rota para obter o catálogo de serviços
-app.get('/api/services', (req, res) => {
-  res.json(SERVICES);
+// Função para gerar sugestões de serviços baseadas no perfil
+function generateServiceSuggestions(profileData) {
+  const followersCount = profileData.stats?.followers || profileData.followersCount || 0;
+  const postsCount = profileData.stats?.posts || profileData.postsCount || 0;
+
+  // Criar recomendações baseadas nos dados do perfil
+  const suggestions = {
+    recommendedServices: [
+      {
+        id: 'followers',
+        title: 'FaStar',
+        description: 'Aumente seu perfil com seguidores reais e ativos',
+        icon: 'FaStar',
+        options: []
+      },
+      {
+        id: 'engagement',
+        title: 'FaChartLine',
+        description: 'Aumente curtidas e comentários nas suas publicações',
+        icon: 'FaChartLine',
+        options: []
+      }
+    ],
+    priorities: []
+  };
+
+  // Lógica para recomendar quantidade de seguidores
+  if (followersCount < 1000) {
+    suggestions.recommendedServices[0].options.push(
+      { id: 'followers-1500', quantity: '1.500', price: 99.99 },
+      { id: 'followers-3000', quantity: '3.000', price: 189.90 }
+    );
+    suggestions.priorities.push({ serviceId: 'followers', level: 'high' });
+  } else if (followersCount < 5000) {
+    suggestions.recommendedServices[0].options.push(
+      { id: 'followers-2000', quantity: '2.000 a 2.300', price: 129.90 },
+      { id: 'followers-5000', quantity: '5.000', price: 289.90 }
+    );
+    suggestions.priorities.push({ serviceId: 'followers', level: 'medium' });
+  } else {
+    suggestions.recommendedServices[0].options.push(
+      { id: 'followers-5000', quantity: '5.000', price: 289.90 },
+      { id: 'followers-10000', quantity: '10.000', price: 569.90 }
+    );
+  }
+
+  // Lógica para recomendar engajamento
+  if (postsCount > 0) {
+    suggestions.recommendedServices[1].options.push(
+      { id: 'likes-500', type: 'Curtidas', quantity: '500', price: 45.00 },
+      { id: 'comments-10', type: 'Comentários', quantity: '10', price: 25.00 }
+    );
+    
+    if (followersCount > 2000) {
+      suggestions.priorities.push({ serviceId: 'engagement', level: 'medium' });
+    }
+  }
+
+  // Adicionar gestão de social media se tiver muitos seguidores
+  if (followersCount > 10000) {
+    suggestions.recommendedServices.push({
+      id: 'social-media',
+      title: 'FaShoppingCart',
+      description: 'Planos completos de social media para sua marca',
+      icon: 'FaShoppingCart',
+      options: [
+        { id: 'social-media-basic', type: 'Plano Básico', price: 499.90 },
+        { id: 'social-media-premium', type: 'Plano Premium', price: 899.90 }
+      ]
+    });
+    suggestions.priorities.push({ serviceId: 'social-media', level: 'high' });
+  }
+
+  return suggestions;
+}
+
+// Nova rota para consultar histórico de pesquisas
+app.get('/api/search-history', async (req, res) => {
+  if (!dbPool) {
+    return res.status(500).json({ error: 'Banco de dados não disponível' });
+  }
+
+  try {
+    // Opcionalmente filtrar por username
+    const username = req.query.username;
+    let query = 'SELECT * FROM profile_search_history ORDER BY search_timestamp DESC LIMIT 100';
+    let params = [];
+
+    if (username) {
+      query = 'SELECT * FROM profile_search_history WHERE username = ? ORDER BY search_timestamp DESC LIMIT 100';
+      params = [username];
+    }
+
+    const [rows] = await dbPool.query(query, params);
+    res.json(rows);
+  } catch (error) {
+    console.error('Erro ao buscar histórico:', error);
+    res.status(500).json({ error: 'Erro ao buscar histórico de pesquisas' });
+  }
 });
 
-// Configuração da porta
+// Outras rotas...
+
+// Porta padrão do servidor
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
-}); 
+// Inicializar o pool de conexões, inicializar database e iniciar o servidor
+initializeDbPool()
+  .then(() => {
+    return initializeDatabase();
+  })
+  .then(() => {
+    // Iniciar o servidor após a inicialização do pool e do banco
+    app.listen(PORT, () => {
+    console.log(`Servidor rodando na porta ${PORT}`);
+  });
+  })
+  .catch(err => {
+    console.error('Erro ao inicializar o servidor:', err);
+  }); 

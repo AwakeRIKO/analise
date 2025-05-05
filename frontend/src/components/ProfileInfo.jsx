@@ -1,9 +1,60 @@
 import { FaUser, FaImage, FaUsers, FaChartLine, FaBrain, FaSync } from 'react-icons/fa'
 import { motion } from 'framer-motion'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 const ProfileInfo = ({ profile }) => {
   const [isReloading, setIsReloading] = useState(false)
+  const [stats, setStats] = useState({
+    followers: 0,
+    following: 0,
+    posts: 0
+  })
+
+  // Função para processar URLs de imagens do Instagram
+  const processImageUrl = (url) => {
+    if (!url) return '/images/profile-placeholder.svg';
+    
+    // Verificar se é uma URL do Instagram
+    if (url.includes('instagram') && url.includes('fbcdn.net')) {
+      try {
+        // Usar a nova rota de proxy do backend que salva a imagem localmente
+        return `/api/profile-image/${profile.username}?url=${encodeURIComponent(url)}`;
+      } catch (error) {
+        console.error("Erro ao processar URL da imagem:", error);
+        return '/images/profile-placeholder.svg';
+      }
+    }
+    
+    return url || '/images/profile-placeholder.svg';
+  };
+
+  // Função para tratar erros de carregamento de imagem
+  const handleImageError = (e) => {
+    console.error("Erro ao carregar imagem do perfil:", e);
+    e.target.onerror = null; // Prevenir loop
+    e.target.src = '/images/profile-placeholder.svg';
+    e.target.classList.add('img-error');
+  };
+
+  useEffect(() => {
+    // Processa os dados do perfil e define as estatísticas
+    if (profile) {
+      // Verifica se os dados estão no formato antigo (followersCount) ou novo (stats)
+      if (profile.stats && typeof profile.stats === 'object') {
+        setStats({
+          followers: profile.stats.followers || 0,
+          following: profile.stats.following || 0,
+          posts: profile.stats.posts || 0
+        })
+      } else {
+        setStats({
+          followers: profile.followersCount || 0,
+          following: profile.followingCount || 0,
+          posts: profile.postsCount || 0
+        })
+      }
+    }
+  }, [profile])
 
   const handleReload = () => {
     setIsReloading(true)
@@ -20,9 +71,13 @@ const ProfileInfo = ({ profile }) => {
       <div className="flex flex-col md:flex-row">
         <div className="flex-shrink-0 mb-4 md:mb-0 md:mr-6">
           <img 
-            src={profile.profilePicture || 'https://via.placeholder.com/150'} 
+            src={processImageUrl(profile.profilePicture)} 
             alt={`Foto de perfil de ${profile.username}`}
             className="w-32 h-32 rounded-full object-cover border-4 border-instagram-purple"
+            onError={handleImageError}
+            crossOrigin="anonymous"
+            loading="eager"
+            referrerPolicy="no-referrer"
           />
         </div>
         
@@ -41,7 +96,7 @@ const ProfileInfo = ({ profile }) => {
               </div>
               <div>
                 <p className="text-sm text-gray-500">Seguidores</p>
-                <p className="font-semibold">{profile.followersCount.toLocaleString()}</p>
+                <p className="font-semibold">{Number(stats.followers).toLocaleString()}</p>
               </div>
             </div>
             
@@ -51,7 +106,7 @@ const ProfileInfo = ({ profile }) => {
               </div>
               <div>
                 <p className="text-sm text-gray-500">Publicações</p>
-                <p className="font-semibold">{profile.postsCount.toLocaleString()}</p>
+                <p className="font-semibold">{Number(stats.posts).toLocaleString()}</p>
               </div>
             </div>
             
