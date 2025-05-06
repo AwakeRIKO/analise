@@ -10,9 +10,7 @@ ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, T
 
 // URL da API - usar URL completa quando não estiver em localhost
 const getApiUrl = () => {
-  return window.location.hostname === 'localhost' 
-    ? '/api' 
-    : 'https://teste1.gestaoti.cloud/api';
+  return import.meta.env.VITE_API_URL;
 };
 
 const Dashboard = () => {
