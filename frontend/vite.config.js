@@ -11,10 +11,9 @@ export default defineConfig({
         changeOrigin: true,
       }
     },
-    allowedHosts: ['teste1.gestaoti.cloud', 'insta.gestaoti.cloud']
+    allowedHosts: ['analise.vendadb.com']
   },
   define: {
-    'import.meta.env.VITE_API_URL': JSON.stringify('/api'),
-    'import.meta.env.VITE_API_REMOTE_URL': JSON.stringify('https://teste1.gestaoti.cloud/api')
+    'import.meta.env.VITE_API_URL': JSON.stringify('/api')
   }
-}) 
+})
