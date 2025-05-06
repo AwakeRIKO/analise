@@ -7,7 +7,7 @@ import axios from 'axios';
 const getApiUrl = () => {
   return window.location.hostname === 'localhost' 
     ? '/api' 
-    : 'https://teste1.gestaoti.cloud/api';
+    : import.meta.env.VITE_API_URL;
 };
 
 const DashboardHome = () => {
