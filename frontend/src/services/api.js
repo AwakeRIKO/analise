@@ -2,8 +2,8 @@ import requestQueue from './requestQueue';
 import cookieManager from './cookieManager';
 import axios from 'axios';
 
-// URL da API modificada para apontar para o túnel Cloudflare do backend
-const API_URL = 'https://teste1.gestaoti.cloud/api';
+// URL da API modificada para apontar para o backend
+const API_URL = import.meta.env.VITE_API_URL;
 // Variável para determinar se deve usar o proxy local ou a URL remota
 const USE_PROXY = window.location.hostname === 'localhost';
 
